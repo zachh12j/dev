@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import ImageUploader from "@/components/ImageUploader";
 import ResultPreview from "@/components/ResultPreview";
+import TokenSettings from "@/components/TokenSettings";
+import { transformImage, ReplicateError } from "@/lib/replicate";
 
 const LOADING_MESSAGES = [
   "Summoning whiskers…",
@@ -15,12 +17,14 @@ const LOADING_MESSAGES = [
 type Status = "idle" | "loading" | "done" | "error";
 
 export default function Page() {
+  const [token, setToken] = useState("");
   const [originalDataUrl, setOriginalDataUrl] = useState<string | null>(null);
   const [originalFile, setOriginalFile] = useState<File | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0]);
+  const abortRef = useRef<AbortController | null>(null);
 
   const handleFileSelected = useCallback((file: File, dataUrl: string) => {
     setOriginalFile(file);
@@ -31,6 +35,7 @@ export default function Page() {
   }, []);
 
   const handleReset = useCallback(() => {
+    abortRef.current?.abort();
     setOriginalFile(null);
     setOriginalDataUrl(null);
     setResultUrl(null);
@@ -39,13 +44,20 @@ export default function Page() {
   }, []);
 
   const handleTransform = useCallback(async () => {
-    if (!originalFile) return;
+    if (!originalFile || !originalDataUrl) return;
+
+    if (!token) {
+      setError(
+        "Add your Replicate API token in the Settings panel above before transforming."
+      );
+      setStatus("error");
+      return;
+    }
 
     setStatus("loading");
     setError(null);
     setResultUrl(null);
 
-    // Cycle through fun loading copy while we wait.
     let messageIndex = 0;
     setLoadingMessage(LOADING_MESSAGES[0]);
     const messageTimer = setInterval(() => {
@@ -53,37 +65,30 @@ export default function Page() {
       setLoadingMessage(LOADING_MESSAGES[messageIndex]);
     }, 2200);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
-      const formData = new FormData();
-      formData.append("image", originalFile);
-
-      const response = await fetch("/api/transform", {
-        method: "POST",
-        body: formData,
+      const output = await transformImage(token, originalDataUrl, {
+        signal: controller.signal,
       });
-
-      const payload = await response.json().catch(() => null);
-
-      if (!response.ok || !payload?.image) {
-        const message =
-          payload?.error ||
-          "We couldn't transform that image. Please try a different photo.";
-        throw new Error(message);
-      }
-
-      setResultUrl(payload.image as string);
+      setResultUrl(output);
       setStatus("done");
     } catch (err) {
+      if ((err as Error)?.name === "AbortError") return;
       const message =
-        err instanceof Error
+        err instanceof ReplicateError
           ? err.message
-          : "Something went wrong while talking to the cat oracle.";
+          : err instanceof Error
+            ? err.message
+            : "Something went wrong while talking to the cat oracle.";
       setError(message);
       setStatus("error");
     } finally {
       clearInterval(messageTimer);
+      if (abortRef.current === controller) abortRef.current = null;
     }
-  }, [originalFile]);
+  }, [originalFile, originalDataUrl, token]);
 
   return (
     <main className="min-h-dvh px-4 py-10 sm:py-16">
@@ -100,6 +105,10 @@ export default function Page() {
             Upload a photo and let the whiskers take over.
           </p>
         </header>
+
+        <div className="mb-6 animate-fade-in">
+          <TokenSettings onTokenChange={setToken} />
+        </div>
 
         <section className="card p-5 sm:p-8 animate-fade-in">
           <ImageUploader
@@ -168,8 +177,9 @@ export default function Page() {
         )}
 
         <footer className="mt-16 text-center text-xs text-purr/60">
-          Made with <span aria-hidden>🐾</span> for cat people. Your images are sent
-          to a third-party AI provider for processing.
+          Made with <span aria-hidden>🐾</span> for cat people. Your image and
+          token go directly from this page to Replicate — nothing is stored on
+          a server.
         </footer>
       </div>
     </main>
