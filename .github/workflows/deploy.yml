@@ -3,8 +3,7 @@ name: Deploy CatMorph to GitHub Pages
 on:
   push:
     branches:
-      - main
-      - "claude/**"
+      - "**"
   workflow_dispatch:
 
 permissions:
