@@ -7,20 +7,13 @@ const config: Config = {
   ],
   theme: {
     extend: {
-      colors: {
-        cream: "#FFF8F1",
-        whisker: "#F5E6D3",
-        paw: "#E27D60",
-        ink: "#1F1B16",
-        purr: "#7C4A3A",
-      },
       fontFamily: {
-        display: ["ui-serif", "Georgia", "Cambria", "Times New Roman", "serif"],
+        display: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
         sans: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
       },
       boxShadow: {
-        soft: "0 10px 30px -10px rgba(31, 27, 22, 0.18)",
-        glow: "0 0 0 6px rgba(226, 125, 96, 0.12)",
+        soft: "0 20px 50px -20px rgba(0, 0, 0, 0.6)",
+        glow: "0 0 0 6px rgba(34, 211, 238, 0.15)",
       },
       keyframes: {
         "fade-in": {

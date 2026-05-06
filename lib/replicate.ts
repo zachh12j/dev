@@ -1,24 +1,25 @@
-// Browser-side Replicate client.
+// Browser-side Replicate client for audio stem separation.
 //
-// The original CatMorph used a Next.js API route to keep the Replicate token
-// server-side. Static GitHub Pages can't run that route, so we call Replicate
-// directly from the browser using a token the user pastes into the UI. The
-// token is stored in localStorage on the visitor's own device — it is never
-// committed to the repo and never leaves their machine except in requests
-// to api.replicate.com.
+// Stemly is a fully static site, so there is no backend to hold a Replicate
+// API token. The visitor pastes their own token into the Settings panel; it
+// is stored in localStorage and sent directly to api.replicate.com from
+// their browser. Replicate's REST API supports CORS so this works from any
+// origin (including GitHub Pages).
 //
-// Replicate's REST API supports CORS for browser clients, so this works from
-// any origin (including GitHub Pages).
+// We use the Demucs model (Meta's open-source music source separator) to
+// split a single audio file into four stems: vocals, drums, bass, and other.
 
-const MODEL = "black-forest-labs/flux-kontext-pro";
+const MODEL = "cjwbw/demucs";
 const API_BASE = "https://api.replicate.com/v1";
 
-const CAT_PROMPT =
-  "Transform the person in this image into a realistic cat version of themselves. " +
-  "Preserve the original pose, camera angle, background, lighting, clothing silhouette, " +
-  "and composition. Replace human facial features with feline features, including cat ears, " +
-  "whiskers, fur texture, cat-like eyes, and a natural cat face shape. Make it playful, " +
-  "high-quality, realistic, and visually coherent. Do not distort the background or add extra people.";
+// Maximum upload size. Predictions are sent as base64 data URIs in the JSON
+// request body, so very large files balloon the request. 25 MB raw → ~34 MB
+// encoded, which still fits comfortably within Replicate's request limits.
+export const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+
+export const STEM_KEYS = ["vocals", "drums", "bass", "other"] as const;
+export type StemKey = (typeof STEM_KEYS)[number];
+export type Stems = Record<StemKey, string>;
 
 type PredictionStatus =
   | "starting"
@@ -30,21 +31,26 @@ type PredictionStatus =
 type Prediction = {
   id: string;
   status: PredictionStatus;
-  output: string | string[] | null;
+  output: unknown;
   error: string | null;
   urls: { get: string; cancel: string };
 };
 
 export class ReplicateError extends Error {}
 
-export async function transformImage(
+export type SeparateOptions = {
+  signal?: AbortSignal;
+  onStatus?: (status: PredictionStatus) => void;
+};
+
+export async function separateStems(
   token: string,
-  imageDataUrl: string,
-  options: { signal?: AbortSignal } = {}
-): Promise<string> {
+  audioDataUrl: string,
+  options: SeparateOptions = {}
+): Promise<Stems> {
   if (!token) {
     throw new ReplicateError(
-      "Add your Replicate API token in Settings before transforming."
+      "Add your Replicate API token in Settings before separating a track."
     );
   }
 
@@ -53,8 +59,6 @@ export async function transformImage(
     "Content-Type": "application/json",
   };
 
-  // Kick off the prediction. Using the model-prediction endpoint avoids
-  // having to look up a specific version ID.
   const startResponse = await fetch(
     `${API_BASE}/models/${MODEL}/predictions`,
     {
@@ -63,10 +67,12 @@ export async function transformImage(
       signal: options.signal,
       body: JSON.stringify({
         input: {
-          prompt: CAT_PROMPT,
-          input_image: imageDataUrl,
-          output_format: "png",
-          safety_tolerance: 2,
+          audio: audioDataUrl,
+          stem: "none",
+          model: "htdemucs",
+          output_format: "mp3",
+          mp3_bitrate: 320,
+          shifts: 1,
         },
       }),
     }
@@ -77,10 +83,11 @@ export async function transformImage(
   }
 
   let prediction = (await startResponse.json()) as Prediction;
+  options.onStatus?.(prediction.status);
 
-  // Poll until the prediction is done. Replicate edits typically take
-  // 10–60s; we cap at 3 minutes total before giving up.
-  const deadline = Date.now() + 3 * 60 * 1000;
+  // Demucs typically takes 30s–3min depending on track length. We cap at
+  // 8 minutes total before giving up so a stuck prediction can't hang the UI.
+  const deadline = Date.now() + 8 * 60 * 1000;
   while (
     prediction.status !== "succeeded" &&
     prediction.status !== "failed" &&
@@ -88,11 +95,11 @@ export async function transformImage(
   ) {
     if (Date.now() > deadline) {
       throw new ReplicateError(
-        "The cat oracle is taking longer than expected. Please try again."
+        "Separation is taking longer than expected. Please try again with a shorter track."
       );
     }
 
-    await sleep(2000, options.signal);
+    await sleep(2500, options.signal);
 
     const pollResponse = await fetch(prediction.urls.get, {
       headers,
@@ -102,24 +109,40 @@ export async function transformImage(
       throw new ReplicateError(await readError(pollResponse));
     }
     prediction = (await pollResponse.json()) as Prediction;
+    options.onStatus?.(prediction.status);
   }
 
   if (prediction.status !== "succeeded") {
     throw new ReplicateError(
       prediction.error ||
-        "The image provider couldn't produce a result for that photo."
+        "Demucs couldn't separate that track. Try a different file."
     );
   }
 
-  const output = Array.isArray(prediction.output)
-    ? prediction.output[0]
-    : prediction.output;
+  return parseStems(prediction.output);
+}
 
-  if (typeof output !== "string") {
-    throw new ReplicateError("Unexpected response shape from the image provider.");
+// Demucs returns an object of the form
+// { vocals, drums, bass, other } with each value being a URL string.
+// We accept any object whose values are strings and pick out the four stems
+// we care about so we don't break if Replicate adds extra keys.
+function parseStems(output: unknown): Stems {
+  if (!output || typeof output !== "object" || Array.isArray(output)) {
+    throw new ReplicateError("Unexpected response shape from Demucs.");
   }
 
-  return output;
+  const record = output as Record<string, unknown>;
+  const result: Partial<Stems> = {};
+  for (const key of STEM_KEYS) {
+    const value = record[key];
+    if (typeof value !== "string" || !value) {
+      throw new ReplicateError(
+        `Demucs response was missing the "${key}" stem. Try again.`
+      );
+    }
+    result[key] = value;
+  }
+  return result as Stems;
 }
 
 async function readError(response: Response): Promise<string> {
@@ -135,6 +158,9 @@ async function readError(response: Response): Promise<string> {
   }
   if (response.status === 402) {
     return "Your Replicate account is out of credit for this model.";
+  }
+  if (response.status === 413) {
+    return "Track is too large. Try compressing it to MP3 under 25 MB.";
   }
   if (response.status === 429) {
     return "Rate limited by Replicate. Wait a moment and try again.";

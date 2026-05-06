@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const STORAGE_KEY = "catmorph.replicate_token";
+const STORAGE_KEY = "stemly.replicate_token";
 
 type Props = {
   onTokenChange: (token: string) => void;
@@ -57,37 +57,36 @@ export default function TokenSettings({ onTokenChange }: Props) {
       >
         <span className="flex items-center gap-2">
           <span aria-hidden>🔑</span>
-          <span className="font-medium text-ink">Replicate API token</span>
+          <span className="font-medium text-white">Replicate API token</span>
           <span
             className={[
               "ml-1 rounded-full px-2 py-0.5 text-xs",
               token
-                ? "bg-emerald-100 text-emerald-700"
-                : "bg-amber-100 text-amber-700",
+                ? "bg-emerald-500/20 text-emerald-300"
+                : "bg-amber-500/20 text-amber-300",
             ].join(" ")}
           >
             {token ? `Saved · ${masked}` : "Not set"}
           </span>
         </span>
-        <span className="text-purr/70 text-sm">
-          {open ? "Hide" : "Edit"}
-        </span>
+        <span className="text-white/50 text-sm">{open ? "Hide" : "Edit"}</span>
       </button>
 
       {open && (
         <div className="mt-4 space-y-3">
-          <p className="text-sm text-purr/80">
-            Get a free token from{" "}
+          <p className="text-sm text-white/70">
+            Get a token from{" "}
             <a
               href="https://replicate.com/account/api-tokens"
               target="_blank"
               rel="noopener noreferrer"
-              className="underline underline-offset-2 text-paw"
+              className="underline underline-offset-2 text-cyan-300 hover:text-cyan-200"
             >
               replicate.com/account/api-tokens
             </a>
             . It is stored only in your browser&apos;s localStorage and sent
-            directly to Replicate from this page.
+            directly from this page to Replicate — nothing is uploaded to a
+            server we control.
           </p>
           <div className="flex flex-col sm:flex-row gap-2">
             <input
@@ -97,7 +96,7 @@ export default function TokenSettings({ onTokenChange }: Props) {
               placeholder="r8_..."
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="flex-1 rounded-full border border-whisker bg-white px-4 py-2.5 text-sm text-ink outline-none focus:border-paw focus:shadow-glow"
+              className="flex-1 rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:border-cyan-400 focus:shadow-glow"
             />
             <div className="flex gap-2">
               <button type="button" onClick={save} className="btn-primary !px-5 !py-2.5 text-sm">
@@ -111,7 +110,7 @@ export default function TokenSettings({ onTokenChange }: Props) {
             </div>
           </div>
           {savedAt && (
-            <p className="text-xs text-emerald-700" key={savedAt}>
+            <p className="text-xs text-emerald-300" key={savedAt}>
               {token ? "Token saved." : "Token cleared."}
             </p>
           )}
